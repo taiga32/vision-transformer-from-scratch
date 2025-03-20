@@ -1,0 +1,85 @@
+```{python}
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+import cv2
+from PIL import Image
+import matplotlib.pyplot as plt
+```
+
+```{python}
+
+def image_to_patches(image: np.ndarray, patch_size=3):
+    """
+    画像を3×3のパッチに分割する関数
+    :param image: (H, W, C) の画像 (np.ndarray, RGB形式)
+    :param patch_size: パッチのサイズ
+    :return: (N, patch_size, patch_size, C) のパッチ配列
+    """
+    H, W, C = image.shape
+    patches = []
+
+    # 画像を3×3のサイズに切り分ける
+    for i in range(0, H, patch_size):
+        for j in range(0, W, patch_size):
+            patch = image[i:i+patch_size, j:j+patch_size, :]
+            if patch.shape[:2] == (patch_size, patch_size):  # パッチサイズに満たない部分を除く
+                patches.append(patch)
+    
+    return np.array(patches)  # (N, 3, 3, 3)
+```
+
+```{python}
+# 画像の読み込み (PIL → OpenCV)
+image = Image.open("sample.jpg")  # 画像を読み込む (適当な画像を用意)
+image = image.resize((224, 224))  # 例として 24×24 にリサイズ
+image = np.array(image)
+
+# 3×3のパッチに分割
+patches = image_to_patches(image, patch_size=16)
+print("パッチの形状:", patches.shape)  # (64, 3, 3, 3) になるはず
+```
+
+```{python}
+# パッチを表示
+num_patches = patches.shape[0]
+grid_size = int(np.sqrt(num_patches))
+fig, axes = plt.subplots(grid_size, grid_size, figsize=(8, 8))
+
+for i, ax in enumerate(axes.flat):
+    ax.imshow(patches[i])
+    ax.axis('off')
+
+plt.show()
+
+```
+
+```{python}
+class LearnablePositionalEmbedding(nn.Module):
+    def __init__(self, num_patches, d_model):
+        super().__init__()
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches, d_model))
+
+    def forward(self, x):
+        return x + self.pos_embedding # 入力に位置埋め込みを足す
+
+d_model = 768
+num_patches = patches.shape[0]
+vit_pos_embedding = LearnablePositionalEmbedding(num_patches, d_model)
+
+# パッチをフラット化して埋め込み次元に合わせる
+patches_flat = patches.reshape(num_patches, -1)  # (196, 27)
+patches_flat = torch.tensor(patches_flat, dtype=torch.float32)
+patches_embedded = torch.nn.functional.linear(patches_flat, torch.randn(d_model, patches_flat.shape[1]))  # (196, 768)
+patches_embedded = patches_embedded.unsqueeze(0)  # (1, 196, 768)
+
+# 位置埋め込みを適用
+pos_embedded_patches = vit_pos_embedding(patches_embedded)
+print(pos_embedded_patches.shape)  # (1, 196, 768)
+
+```
+
+```{python}
+print(pos_embedded_patches)
+```
