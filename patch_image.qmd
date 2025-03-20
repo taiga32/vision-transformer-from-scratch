@@ -6,10 +6,11 @@ import numpy as np
 import cv2
 from PIL import Image
 import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
+from torchsummary import summary
 ```
 
 ```{python}
-
 def image_to_patches(image: np.ndarray, patch_size=3):
     """
     画像を3×3のパッチに分割する関数
@@ -18,6 +19,7 @@ def image_to_patches(image: np.ndarray, patch_size=3):
     :return: (N, patch_size, patch_size, C) のパッチ配列
     """
     H, W, C = image.shape
+    print('読み込んだ画像のサイズ:', image.shape)
     patches = []
 
     # 画像を3×3のサイズに切り分ける
@@ -33,12 +35,13 @@ def image_to_patches(image: np.ndarray, patch_size=3):
 ```{python}
 # 画像の読み込み (PIL → OpenCV)
 image = Image.open("sample.jpg")  # 画像を読み込む (適当な画像を用意)
-image = image.resize((224, 224))  # 例として 24×24 にリサイズ
+image = image.resize((224, 224))
 image = np.array(image)
+print('リサイズ後の画像:', image.shape)
 
-# 3×3のパッチに分割
+# 16×16のパッチに分割
 patches = image_to_patches(image, patch_size=16)
-print("パッチの形状:", patches.shape)  # (64, 3, 3, 3) になるはず
+print("パッチの形状:", patches.shape)  # (196, 16, 16, 3) になるはず
 ```
 
 ```{python}
@@ -52,34 +55,57 @@ for i, ax in enumerate(axes.flat):
     ax.axis('off')
 
 plt.show()
-
 ```
 
 ```{python}
-class LearnablePositionalEmbedding(nn.Module):
-    def __init__(self, num_patches, d_model):
-        super().__init__()
+class VisionTransformer(nn.Module):
+    def __init__(self, num_patches, d_model, output_size):
+        super(VisionTransformer, self).__init__()
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches, d_model))
-
+        print('位置埋め込みサイズ:', self.pos_embedding.shape)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=4)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=3)
+        self.fc = nn.Linear(d_model * num_patches, output_size)
+        self.softmax = nn.Softmax(dim=1)
+    
     def forward(self, x):
-        return x + self.pos_embedding # 入力に位置埋め込みを足す
+        x = x + self.pos_embedding  # 位置埋め込みを追加
+        print('位置埋め込み後の画像:', x.shape)
+        x = x.permute(1, 0, 2)  # (batch_size, seq_length, input_size) -> (seq_length, batch_size, input_size)
+        x = self.transformer(x)  # srcとtgtに同じ入力を使用
+        print('transformer後:', x.shape)
+        x = x.permute(1, 0, 2).contiguous()  # (seq_length, batch_size, input_size) -> (batch_size, seq_length, input_size)
+        x = x.view(x.size(0), -1)  # Flatten
+        fc_x = self.fc(x)
+
+        return self.softmax(fc_x)
 
 d_model = 768
 num_patches = patches.shape[0]
-vit_pos_embedding = LearnablePositionalEmbedding(num_patches, d_model)
+output_size = 10  # 任意の出力サイズ
+model = VisionTransformer(num_patches, d_model, output_size)
 
 # パッチをフラット化して埋め込み次元に合わせる
-patches_flat = patches.reshape(num_patches, -1)  # (196, 27)
+patches_flat = patches.reshape(num_patches, -1)  # (196, 768)
 patches_flat = torch.tensor(patches_flat, dtype=torch.float32)
 patches_embedded = torch.nn.functional.linear(patches_flat, torch.randn(d_model, patches_flat.shape[1]))  # (196, 768)
 patches_embedded = patches_embedded.unsqueeze(0)  # (1, 196, 768)
 
-# 位置埋め込みを適用
-pos_embedded_patches = vit_pos_embedding(patches_embedded)
-print(pos_embedded_patches.shape)  # (1, 196, 768)
-
+# モデルに入力
+output = model(patches_embedded)
+print('output:', output.shape)
+print('output:', output)
 ```
 
 ```{python}
-print(pos_embedded_patches)
+
+
+# TensorBoardの設定
+writer = SummaryWriter('runs/fashion_mnist_experiment_2')
+
+# モデルのグラフをTensorBoardに追加
+dummy_input = torch.randn(1, num_patches, d_model)
+print(dummy_input.shape)
+writer.add_graph(model, dummy_input)
+writer.close()
 ```
